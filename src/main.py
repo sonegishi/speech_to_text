@@ -104,10 +104,11 @@ def convert_speech_to_text(bucket_name, source_file_name, destination_blob_name,
 
 
 mp4_file_path = '../data/sample.mp4'
-mp3_file_path = '../data/sample.mp3'
-# convert_mp4_to_mp3(mp4_file_path, mp3_file_path)
+mp3_file_path = sys.argv[1]
 
-bucket_name = 'negishi'
-destination_blob_name = 'sample.mp3'
-text_file = '../out/sample.txt'
-convert_speech_to_text(bucket_name, mp3_file_path, destination_blob_name, text_file)
+if mp3_file_path:
+#     convert_mp4_to_mp3(mp4_file_path, mp3_file_path)
+    bucket_name = 'negishi'
+    destination_blob_name = 'sample.mp3'
+    text_file = '../out/sample.txt'
+    convert_speech_to_text(bucket_name, mp3_file_path, destination_blob_name, text_file)
