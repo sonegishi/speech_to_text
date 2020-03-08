@@ -64,7 +64,6 @@ def _speech_to_text(storage_uri):
 
     print(u'Waiting for operation to complete...')
     response = operation.result()
-    print(f'Response:\n{response}')
     return response
 
 
@@ -97,40 +96,6 @@ def _delete_blob(bucket_name, blob_name):
 def convert_mp4_to_mp3(mp4_file_path, export_file_path): 
     video = VideoFileClip(mp4_file_path)
     video.audio.write_audiofile(export_file_path)
-
-
-def convert_speech_to_text(bucket_name, source_file_name, destination_blob_name, text_file_name):
-    _upload_blob(bucket_name, source_file_name, destination_blob_name)
-
-    storage_uri = f'gs://{bucket_name}/{destination_blob_name}'
-    responses = _speech_to_text(storage_uri)
-    for result in responses.results:
-        alternative = result.alternatives[0]
-        print(f'Transcript: {alternative.transcript}')
-        break
-
-    _delete_blob(bucket_name, destination_blob_name)
-
-    with open(text_file, 'w') as f:
-        f.write(alternative.transcript)
-    print(f'File {text_file} created.')
-
-
-def convert_long_speech_to_text(bucket_name, source_file_name, destination_blob_name, text_file_name):
-    _upload_blob(bucket_name, source_file_name, destination_blob_name)
-
-    storage_uri = f'gs://{bucket_name}/{destination_blob_name}'
-    responses = _speech_to_text(storage_uri)
-    for result in responses.results:
-        alternative = result.alternatives[0]
-        print(f'Transcript: {alternative.transcript}')
-        break
-
-    _delete_blob(bucket_name, destination_blob_name)
-
-    with open(text_file, 'w') as f:
-        f.write(alternative.transcript)
-    print(f'File {text_file} created.')
 
 
 def convert_m4a_flac(source_path, target_path):
