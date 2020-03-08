@@ -1,5 +1,6 @@
 jupyterlab
 jupytext
+pydub
 pyqt5
 moviepy
 google-cloud-storage
