@@ -1,152 +1,291 @@
-# ---
-# jupyter:
-#   jupytext:
-#     formats: ipynb,py:light
-#     text_representation:
-#       extension: .py
-#       format_name: light
-#       format_version: '1.5'
-#       jupytext_version: 1.3.4
-#   kernelspec:
-#     display_name: Python 3
-#     language: python
-#     name: python3
-# ---
-
-# # Speech to Text
+### Speech to Text
 #
 # https://www.mitsue.co.jp/service/audio_and_video/audio_production/narrators_sample.html
 
 import os
 import sys
 import time
-from moviepy.editor import *
-from pydub import AudioSegment
+
+from google.oauth2 import service_account
 from google.cloud import storage
-from google.cloud import speech_v1
+from google.cloud import speech_v1 as speech
 from google.cloud.speech_v1 import enums
-from google.cloud.speech_v1p1beta1 import enums
+# from google.cloud.speech_v1p1beta1 import enums
+
+from audio import Audio
+
+_ENCODING = 'utf-8'
+
+_LANGUAGE_CODE = 'ja-JP'
+
+_FORMAT_TXT = 'txt'
+_FORMAT_M4A = 'm4a'
+_FORMAT_FLAC = 'flac'
+
+_EXTENSION_FORMAT_TXT = '.' + _FORMAT_TXT
+_EXTENSION_FORMAT_FLAC = '.' + _FORMAT_FLAC
+
+_AUDIO_ENCODING_FLAC = enums.RecognitionConfig.AudioEncoding.FLAC
+_AUDIO_ENCODING_LINEAR16 = enums.RecognitionConfig.AudioEncoding.LINEAR16
+
+_KEY_ENCODING = 'encoding'
+_KEY_SAMPLE_RATE_HERTZ = 'sample_rate_hertz'
+_KEY_LANGUAGE_CODE = 'language_code'
+_KEY_ENABLE_AUTO_PUCTUATION = 'enable_automatic_punctuation'
+_KEY_DIARIZATION_CONFIG = 'diarization_config'
+_KEY_ENABLE_SPEAKER_DIARIZATION = 'enable_speaker_diarization'
+_KEY_MIN_SPEAKER_COUNT = 'min_speaker_count'
+_KEY_MAX_SPEAKER_COUNT = 'max_speaker_count'
+_KEY_USE_ENHANCED = 'use_enhanced'
+_KEY_URI = 'uri'
+
+_CURR_DIRECTORY_PATH = os.path.dirname(os.path.abspath(__file__))
 
 # GCS: us-central1 (Iowa)
 service_account_path = '../service-account.json'
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = service_account_path
 
 
-def _speech_to_text(storage_uri):
-    """
-    Transcribe a long audio file using asynchronous speech recognition
+class SpeechToText(object):
 
-    Args:
-      local_file_path Path to local audio file, e.g. /path/audio.wav
-    """
+    def __init__(self, project, credential, bucket_name):
+        self._project = project
 
-    client = speech_v1.SpeechClient()
+        self._speech_client = speech.SpeechClient()
+        self._storage_client = storage.Client(project=project,
+                                              credentials=service_account.Credentials.from_service_account_file(credential))
 
-    # local_file_path = 'resources/brooklyn_bridge.raw'
+        self._bucket_name = project + '-' + bucket_name
+        self._storage_uri = None
 
-    # The language of the supplied audio
-    language_code = 'ja-JP'
+        self._audio = None
+        self._texts = None
 
-    # Sample rate in Hertz of the audio data sent
-    sample_rate_hertz = 32000
+        self._check_bucket()
 
-    # Encoding of audio data sent. This sample sets this explicitly.
-    # This field is optional for FLAC and WAV audio formats.
-    encoding = enums.RecognitionConfig.AudioEncoding.FLAC
-    config = {
-        'language_code': language_code,
-        'sample_rate_hertz': sample_rate_hertz,
-        'encoding': encoding,
-    }
-    audio = {'uri': storage_uri}
+    def _check_bucket(self):
+        bucket = self._storage_client.bucket(bucket_name=self._bucket_name)
 
-    operation = client.long_running_recognize(config, audio)
+        if not bucket.exists():
+            bucket.create()
+            print(f'New bucket {bucket} created.')
 
-    print(u'Waiting for operation to complete...')
-    response = operation.result()
-    return response
+    def _get_storage_uri(self, destination_blob_name):
+        return f'gs://{self._bucket_name}/{destination_blob_name}'
+
+    def _upload_blob(self, source_file_path):
+        """Uploads a file to the bucket.
+
+        Args:
+            bucket_name: Bucket name.
+            source_file_name: Source file name.
+            destination_blob_name: Destination blob name.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+        """
+
+        if os.path.exists(source_file_path) and os.path.isfile(source_file_path):
+            destination_blob_name = os.path.basename(source_file_path)
+
+            bucket = self._storage_client.bucket(self._bucket_name)
+            blob = bucket.blob(destination_blob_name)
+
+            blob.upload_from_filename(source_file_path)
+
+            print(f'File {destination_blob_name} uploaded to {blob.path}')
+        else:
+            error_message = f'{source_file_path} does not exist.'
+            raise FileNotFoundError(error_message)
+
+    def _delete_blob(self, source_file_path):
+        """Deletes a blob from the bucket.
+
+        Args:
+            source_file_path: Source file path.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+        """
+
+        if os.path.exists(source_file_path) and os.path.isfile(source_file_path):
+            destination_blob_name = os.path.basename(source_file_path)
+
+            bucket = self._storage_client.bucket(self._bucket_name)
+            blob = bucket.blob(destination_blob_name)
+
+            blob.delete()
+
+            print(f'Blob {destination_blob_name} deleted.')
+        else:
+            error_message = f'{source_file_path} does not exist.'
+            raise FileNotFoundError(error_message)
+
+    def _convert_speech_to_text_by_api(self, storage_uri):
+        """Transcribes a long audio file using asynchronous speech recognition.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+        """
+
+        config = {
+            _KEY_ENCODING: _AUDIO_ENCODING_FLAC,
+            # _KEY_SAMPLE_RATE_HERTZ: _SAMPLE_RATE_HERTZ,
+            _KEY_LANGUAGE_CODE: _LANGUAGE_CODE,
+            _KEY_ENABLE_AUTO_PUCTUATION: True,
+            _KEY_DIARIZATION_CONFIG: {
+                _KEY_ENABLE_SPEAKER_DIARIZATION: True,
+                _KEY_MIN_SPEAKER_COUNT: 2,
+                _KEY_MAX_SPEAKER_COUNT: 3,
+            },
+            _KEY_USE_ENHANCED: True,
+        }
+        audio = {_KEY_URI: storage_uri}
+
+        operation = self._speech_client.long_running_recognize(config, audio)
+
+        def callback(operation_future):
+            result = operation_future.result()
+            progress = response.metadata.progress_percent
+            print(result)
+
+        operation.add_done_callback(callback)
+
+        try:
+            progress = 0
+
+            while progress < 100:
+                try:
+                    progress = operation.metadata.progress_percent
+                    print(f'Progress: {progress}%')
+                except:
+                    pass
+                finally:
+                    time.sleep(5)
+        except NameError:
+            pass
+        except Exception as error:
+            error_message = f'Error: {error}'
+            print(error_message)
+            raise error_message
+        finally:
+            print('Waiting for operation to complete...')
+            response = operation.result()
+            print('Operation done.')
+
+        return response
+
+    def _convert_speech_to_text(self, storage_uri):
+        """Converts speech to text.
+
+        Args:
+            storage_uri: Storage URI.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+        """
+
+        responses = self._convert_speech_to_text_by_api(storage_uri)
+        texts = [result.alternatives[0].transcript for result in responses.results]
+        self._texts = '\n\n'.join(texts)
+
+    def run(self, source_file_path):
+        audio = Audio(file_path=source_file_path)
+
+        base_name = os.path.basename(audio.filename)
+        file_name_wo_ext = base_name.split(os.extsep)[0]
+        export_file_name = file_name_wo_ext + _EXTENSION_FORMAT_FLAC
+        export_file_dir_path = os.path.split(audio.filename)[0]
+        export_file_path = os.path.join(export_file_dir_path, export_file_name)
+
+        if audio.channels != 1:
+            print('Must use single channel (mono) audio.')
+            sys.exit()
+
+        audio.to_flac(export_file_path=export_file_path)
+
+        self._upload_blob(source_file_path=export_file_path)
+
+        destination_blob_name = os.path.basename(export_file_path)
+        storage_uri = self._get_storage_uri(destination_blob_name)
+        self._convert_speech_to_text(storage_uri)
+
+        self._delete_blob(source_file_path=export_file_path)
+        os.remove(export_file_path)
+
+    def export(self, file_path):
+        with open(file_path, 'w', encoding=_ENCODING) as f:
+            f.write(self._texts)
+        print(f'File {file_path} created.')
 
 
-def _upload_blob(bucket_name, source_file_name, destination_blob_name):
-    """
-    Uploads a file to the bucket.
-    """
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(destination_blob_name)
+def main(argv):
+    """Local Test Environment"""
 
-    blob.upload_from_filename(source_file_name)
+    import argparse
 
-    print(f'File {source_file_name} uploaded to {destination_blob_name}')
+    def _create_argument_parser():
+        parser = argparse.ArgumentParser()
 
+        parser.add_argument('-p',
+                            '--project',
+                            type=str,
+                            required=True,
+                            help='Project ID')
+        parser.add_argument('--credential',
+                            type=str,
+                            required=True,
+                            help='Credential')
+        parser.add_argument('--bucket-name',
+                            type=str,
+                            required=True,
+                            help='Bucket name')
+        parser.add_argument('--audio-file',
+                            type=str,
+                            required=True,
+                            help='Audio file')
 
-def _delete_blob(bucket_name, blob_name):
-    """
-    Deletes a blob from the bucket.
-    """
-    storage_client = storage.Client()
+        return parser
 
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(blob_name)
-    blob.delete()
+    parser = _create_argument_parser()
 
-    print(f'Blob {blob_name} deleted.')
+    args = parser.parse_args(sys.argv[1:])
 
+    project = args.project
+    credential = args.credential
+    bucket_name = args.bucket_name
+    audio_file = args.audio_file
 
-def convert_mp4_to_mp3(mp4_file_path, export_file_path): 
-    video = VideoFileClip(mp4_file_path)
-    video.audio.write_audiofile(export_file_path)
+    print(f'project: {project}')
+    print(f'credential: {credential}')
+    print(f'bucket_name: {bucket_name}')
+    print(f'audio_file: {audio_file}')
 
+    speech_to_text = SpeechToText(project=project,
+                                  credential=credential,
+                                  bucket_name=bucket_name)
 
-def convert_m4a_flac(source_path, target_path):
-    sound = AudioSegment.from_file(source_path, format='m4a')
-#     if sr:
-#         sound = sound.set_frame_rate(sr)
-#     if db:
-#         change_dBFS = db - sound.dBFS
-#         sound = sound.apply_gain(change_dBFS)
-    sound.export(target_path, 'flac') 
+    speech_to_text.run(source_file_path=audio_file)
+
+    export_file_name = os.path.splitext(os.path.basename(audio_file))[0] + _EXTENSION_FORMAT_TXT
+    export_file_path = os.path.join('../out', export_file_name)
+    speech_to_text.export(file_path=export_file_path)
 
 
 if __name__ == '__main__':
-    start_time = time.time()
-
-    audio_file_path = sys.argv[1]
-
-    if audio_file_path:
-        bucket_name = 'negishi'
-        destination_blob_name = 'sample.flac'
-
-        # Create a path to convert to a FLAC file
-        flac_file_path = audio_file_path.split('.')[:-1]
-        flac_file_path = '.'.join(flac_file_path) + '.flac'
-
-        # Convert a m4a file to a flac file
-        convert_m4a_flac(audio_file_path, flac_file_path)
-
-        # Upload the converted file
-        _upload_blob(bucket_name, flac_file_path, destination_blob_name)
-
-        # Convert speech to text
-        storage_uri = f'gs://{bucket_name}/{destination_blob_name}'
-        responses = _speech_to_text(storage_uri)
-        texts = ''
-        for result in responses.results:
-            alternative = result.alternatives[0]
-            texts += alternative.transcript
-            texts += '\n\n'
-
-        # Delete the uploaded files
-        _delete_blob(bucket_name, destination_blob_name)
-
-        # Create a path to save the text file
-        text_file_path = audio_file_path.split('/')[-1]
-        text_file_path = text_file_path.split('.')[:-1]
-        text_file_path = os.path.join('../out/', '.'.join(text_file_path) +'.txt')
-
-        # Export to a text file
-        with open(text_file_path, 'w') as f:
-            f.write(texts)
-        print(f'File {text_file_path} created.')
-
-    print(time.time() - start_time)
+    sys.exit(main(sys.argv))
