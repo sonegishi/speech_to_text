@@ -5,3 +5,4 @@ pyqt5
 moviepy
 google-cloud-storage
 google-cloud-speech
+flake8
