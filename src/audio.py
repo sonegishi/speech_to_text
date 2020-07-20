@@ -101,4 +101,5 @@ class Audio(object):
         # if db:
         #     change_dBFS = db - sound.dBFS
         #     sound = sound.apply_gain(change_dBFS)
+        sound = sound.set_channels(1)
         sound.export(export_file_path, _FORMAT_FLAC)
