@@ -40,10 +40,14 @@ _KEY_USE_ENHANCED = 'use_enhanced'
 _KEY_URI = 'uri'
 
 _CURR_DIRECTORY_PATH = os.path.dirname(os.path.abspath(__file__))
-
-# GCS: us-central1 (Iowa)
-service_account_path = '../service-account.json'
-os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = service_account_path
+_DATA_DIRECTORY_PATH \
+    = os.path.abspath(os.path.join(_CURR_DIRECTORY_PATH,
+                                   '..',
+                                   'data'))
+_OUT_DIRECTORY_PATH \
+    = os.path.abspath(os.path.join(_CURR_DIRECTORY_PATH,
+                                   '..',
+                                   'out'))                             
 
 
 class SpeechToText(object):
@@ -51,7 +55,7 @@ class SpeechToText(object):
     def __init__(self, project, credential, bucket_name):
         self._project = project
 
-        self._speech_client = speech.SpeechClient()
+        self._speech_client = speech.SpeechClient(credentials=service_account.Credentials.from_service_account_file(credential))
         self._storage_client = storage.Client(project=project,
                                               credentials=service_account.Credentials.from_service_account_file(credential))
 
@@ -213,11 +217,12 @@ class SpeechToText(object):
         export_file_dir_path = os.path.split(audio.filename)[0]
         export_file_path = os.path.join(export_file_dir_path, export_file_name)
 
-        if audio.channels != 1:
-            print('Must use single channel (mono) audio.')
-            sys.exit()
-
         audio.to_flac(export_file_path=export_file_path)
+
+        # if audio.channels != 1:
+        #     print('Must use single channel (mono) audio.')
+        #     print(f'Number of channels: {audio.channels}')
+        #     sys.exit()
 
         self._upload_blob(source_file_path=export_file_path)
 
@@ -283,7 +288,7 @@ def main(argv):
     speech_to_text.run(source_file_path=audio_file)
 
     export_file_name = os.path.splitext(os.path.basename(audio_file))[0] + _EXTENSION_FORMAT_TXT
-    export_file_path = os.path.join('../out', export_file_name)
+    export_file_path = os.path.join(_OUT_DIRECTORY_PATH, export_file_name)
     speech_to_text.export(file_path=export_file_path)
 
 
