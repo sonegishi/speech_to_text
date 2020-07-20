@@ -173,7 +173,8 @@ class SpeechToText(object):
             while progress < 100:
                 try:
                     progress = operation.metadata.progress_percent
-                    print(f'Progress: {progress}%')
+                    sys.stdout.write(f'Progress: {progress}%\r')
+                    sys.stdout.flush()
                 except:
                     pass
                 finally:
