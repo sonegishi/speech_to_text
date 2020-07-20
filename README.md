@@ -1,2 +1,2 @@
 # speech_to_text
-Convert a mp4 file to txt file
+Convert an audio file to txt file
